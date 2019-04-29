@@ -1,1 +1,8 @@
-
+Ce projet résidait sur deux tâches:
+• prédire une variable de réponse quantitative
+• prédire une variable de réponse qualitative
+Les ensembles de données sont :
+• fichier ”Data quanti.RData” le résultat est la variable Salary du jeu de données train_Hitters
+• fichier ”Data quanti.RData” le résultat est la variable Salary du jeude données test_Hitters
+• fichier "data train train.RData" le résultat est la variable Y de la liste d'objets data_Khan
+• fichier "data Khan test.RData" le résultat est la variable Y de la liste d'objets data_Khan
