@@ -1,0 +1,324 @@
+---
+title: "Détermination de mod?les lin?aires et prédiction de variables quantitatives et qualitatives"
+author : "EMPIS"
+output: 
+  pdf_document :
+      toc: true 
+        
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE,warning = FALSE)
+```
+
+
+```{r library, include=FALSE}
+library(MASS)
+library(caret)
+library(knitr)
+library(pls)
+library(glmnet)
+library(ROCR)
+library(caTools) 
+
+path="C:/Users/x-jen/Desktop/M1/S7/PROJETML/"
+```
+
+# I - Prédiction d'une variable quantitative
+
+##       1. Pr?sentation des donn?es
+
+Le jeu de donn?es contient 20 variables et 200 observations.
+
+On cherche à prédire la variable Salary.
+
+Extrait des donn?es : 
+
+
+```{r train_Hitters, echo=FALSE}
+load(paste(path,"Data_quanti_train.RData",sep=""))
+kable(head(train_Hitters[,1:11]))
+kable(head(train_Hitters[,12:20]))
+
+```
+
+
+
+##       2. Recherche du meilleur mod?le
+
+Mod?le lin?aire complet :
+
+
+```{r modlin, echo=TRUE, results="hide"}
+modlin=lm(Salary~.,data=train_Hitters)
+```
+
+Il existe plusieurs m?thodes pour trouver le meilleur mod?le.
+
+
+On va utiliser la m?thode de l'AIC, il y a plusieurs options :
+
+
+* backward : d?bute avec toutes les variables candidates et supprime la variable en suivant le crit?re d'ad?quation du mod?le choisi puis r?p?te ce processus tant que d'autres variables peuvent ?tre supprim?es.
+* forward : d?bute avec aucune variable candidate et ajoute la variable ? l'aide d'un crit?re d'ajustement du mod?le choisi dont l'inclusion donne l'am?lioration la plus statistiquement significative puis r?p?te ce processus jusqu'? ce que aucune n'am?liore le mod?le dans une mesure statistiquement significative.
+* both : une combinaison de ce qui pr?c?de, testant ? chaque ?tape les variables ? inclure ou ? exclure.
+
+
+Mise en place de la m?thode :
+
+
+```{r modselect, echo=TRUE, results="hide"}
+modselect_a=stepAIC(modlin,~.,trace=TRUE,direction=c("backward")) 
+modselect_b=stepAIC(modlin,~.,trace=TRUE,direction=c("forward")) 
+modselect_c=stepAIC(modlin,~.,trace=TRUE,direction=c("both"))
+```
+
+
+Regardons maintenant les AIC obtenus avec les diff?rentes options :
+
+
+```{r modselectb, echo=FALSE, results="hide"}
+AIC(modselect_a) 
+AIC(modselect_b) 
+AIC(modselect_c) 
+```
+
+AIC(modselect_a) = `r AIC(modselect_a)`
+
+AIC(modselect_b) = `r AIC(modselect_b)`
+
+AIC(modselect_c) = `r AIC(modselect_c)`
+
+
+
+
+On s?lectionne le mod?le qui a l'AIC le plus petit (ici `r AIC(modselect_c)`) :
+
+Salary ~ AtBat + Hits + Walks + CAtBat + CRuns + CRBI + CWalks + Division 
++ PutOuts + Assists
+
+D?finition du mod?le :
+
+
+```{r model1, echo=TRUE}
+model1<-lm(Salary ~ AtBat + Hits + Walks + CAtBat + CRuns + CRBI + 
+             CWalks +  Division + PutOuts + Assists,data=train_Hitters)
+```
+
+
+Voici les caract?ristiques de notre mod?le :
+
+
+```{r coef, echo=FALSE}
+coef(model1)
+```
+
+
+
+Repr?sentation des caract?ristiques du mod?le :
+
+
+```{r plot, echo=FALSE,fig.align="center"}
+par(mfrow=c(2,2))
+plot(model1)
+par(mfrow=c(1,1))
+```
+
+Residuals vs Fitted : on a des r?sidus majoritairement r?partis autour d'une ligne horizontale sans motifs distincts donc on n'a pas de relation non lin?aire. Donc l'hypoth?se que le mod?le choisi est ad?quat est valid?.
+
+Normal Q-Q : les r?sidus suivent bien une ligne droite et ne s'?cartent pas consid?rablement. Donc, les r?sidus sont normalement distribu?s.
+
+Scale-Location : les r?sidus sont r?partis al?atoirement et la ligne ne pr?sente aucun angle, elle est presque horizontale. Donc, les r?sidus sont r?partis de mani?re ?gale le long des plages de pr?dicteurs.
+
+
+
+##       3. Evaluation de la qualit? de ce mod?le sur l'ensemble d'apprentissage et de test
+
+Calcul du RMSE :
+
+```{r rmse_T}
+predTrain <- predict(model1,newdata=train_Hitters)
+errors<-predTrain-train_Hitters$Salary
+rmse_T <- sqrt(mean(errors^2))
+```
+
+Sur les donn?es d'apprentissage, on obtient un RMSE de : `r rmse_T`
+
+
+
+```{r rmse_T2, echo=FALSE}
+load(paste(path,"Data_quanti_test.RData",sep=""))
+
+predTest <- predict(model1,newdata=test_Hitters)
+errors2<-predTest-test_Hitters$Salary
+rmse_T2 <- sqrt(mean(errors2^2))
+```
+Sur les donn?es de test, on obtient un RMSE de : `r rmse_T2`
+
+
+
+
+Evaluons maintenant la qualit? de ce mod?le sur l'ensemble d'apprentissage en utilisant MSEP sur une proc?dure de v?rification crois?e :
+  
+
+
+```{r cv,fig.width=4, fig.height=4,fig.align="center", results="hide"}
+set.seed(42)
+index <- sample(1:nrow(train_Hitters),50)
+train_Hitters_cv <- train_Hitters[index,]
+model_caret <- train(Salary ~ AtBat + Hits + Walks + CAtBat + CRuns + 
+                       CRBI + CWalks + Division + PutOuts + Assists ,
+                     data = train_Hitters_cv,method = "lm",
+                     trControl = trainControl(
+                       method = "cv", number =10,
+                       verboseIter = TRUE)
+)
+prediction_model_c <- predict(model_caret,data=train_Hitters_cv)
+pcr_fit <- pcr(Salary~ AtBat + Hits + Walks + CAtBat + CRuns + 
+                 CRBI + CWalks + Division + PutOuts + Assists,
+               data = train_Hitters, scale = TRUE, validation = "CV")
+```
+
+
+
+```{r cv2,fig.width=3.5, fig.height=3.5,fig.align="center"}
+model_caret
+validationplot(pcr_fit, val.type = "MSEP")
+predplot(pcr_fit)
+```
+
+# II - Pr?diction d'une variable qualitative
+
+On cherche maintenant ? pr?dire une variable qualitative
+
+## 1. Pr?sentation des donn?es
+
+Extrait des donn?es ? disposition :
+
+```{r data_Khan, echo=FALSE}
+load(paste(path,"Data_Khan_train.RData",sep=""))
+load(paste(path,"Data_Khan_test.RData",sep=""))
+d<-data.frame(data_Khan)
+kable(head(d[,1:9]))
+
+```
+
+## 2. Recherche du meilleur mod?le
+
+On cherche le meilleur mod?le en utilisant la m?thode lasso :
+
+```{r model, echo=TRUE, results="hide"}
+model3<-glmnet(data_Khan$X, data_Khan$Y, family = "binomial", alpha =1)
+
+```
+
+
+On calcule le RMSE :
+
+```{r model3_, echo=TRUE, results="hide"}
+predTrain3 <- predict(model3,data_Khan$X,type='response')
+errors3<-predTrain3-data_Khan$Y
+rmse_T3 <- sqrt(mean(errors3**2))
+
+```
+
+On obtient le r?sultat suivant : `r rmse_T3`
+
+
+   -> RMSE (Root-Mean-Square-Error) est une mesure fr?quemment utilis?e pour repr?senter l'?cart entre les valeurs pr?dites et les valeurs r?elles. Ici, nous avons un RMSE ?gal ? 0.19, donc notre mod?le est bon.
+
+
+## 3. ?valuation de  la qualit? de ce mod?le ? l'aide de la courbe ROC et l'AUC sur l'ensemble d'apprentissage et en utilisant une proc?dure de validation crois?e.
+
+
+
+On utilise la proc?dure de validation crois?e afin de trouver le lambda qui minimise l'erreur. On l'utilise ensuite pour cr?er le mod?le "md_lasso".
+
+
+Courbe ROC (Receiver operating characteristic) : graphique repr?sentant les performances d'un mod?le de classification pour tous les seuils de classification. Cette courbe trace le taux de vrais positifs en fonction du taux de faux positifs.
+
+
+
+
+```{r ROC,fig.width=3.5, fig.height=3.5,fig.align="center"}
+cv_lasso <- cv.glmnet(data_Khan$X, data_Khan$Y, family = "binomial", nfold = 10,
+                      type.measure = "deviance",alpha = 1, paralle = TRUE)
+md_lasso <- glmnet(data_Khan$X, data_Khan$Y, family = "binomial", 
+                   lambda = cv_lasso$lambda.1se, alpha = 1)
+P_lasso <-predict(md_lasso,data_Khan$X, type = "response")
+
+pred_lasso <- prediction(P_lasso,data_Khan$Y)
+roc_lasso <- performance(pred_lasso,"tpr", "fpr")
+plot(roc_lasso,colorize = TRUE,main="ROC courbe")
+auc_lasso <- performance( pred_lasso, "auc")@y.values[[1]]
+```
+
+
+AUC signifie "aire sous la courbe ROC". Cette valeur mesure l'int?gralit? de l'aire ? deux dimensions situ?e sous l'ensemble de la courbe ROC (par calculs d'int?grales) de (0,0) ? (1,1), en gros c'est un r?sum? de la pr?cision du mod?le avec un seul chiffre.
+
+Remarque : l'AUC est pertinente pour ?valuer la qualit? d'un mod?le parce qu'elle est :
+
+ - invariante d'?chelle
+ 
+ - ind?pendante des seuils de classification
+
+
+
+
+->  **On trouve ici l'AUC = 1 donc le mod?le est bon.**
+
+
+
+
+
+
+## 4. Evaluation de l'erreur de classification erron?e sur le kit d'apprentissage en utilisant une proc?dure de validation crois?e.
+
+
+On utilise plot pour tracer la courbe de validation crois?e produite par cv.glmnet.
+
+
+
+```{r cvK,echo=FALSE,fig.width=3.5, fig.height=3.5,fig.align="center"}
+cv.out1<- cv.glmnet(data_Khan$X,data_Khan$Y,family = "binomial",
+                    alpha =1,type.measure = "mse")
+plot(cv.out1)
+```
+
+
+
+De plus, on voulait profiter encore de "cv.out1"  puisque la fonction cv.glmnet ? part l'objet de classe "cv.glmnet" et "lambda", retourne aussi un objet "cvm"" qui est un vecteur de longueur = length(lamba) et contient l'ensemble des erreurs : The mean cross-validated error.
+
+
+Mais aussi un objet "cvsd" qui pr?sente ces erreurs d'une mani?re standardis?e.  
+
+
+
+```{r cvK2,fig.width=3.5, fig.height=3.5,fig.align="center", eval=FALSE}
+cv.out1$cvsd
+```
+
+
+Extrait :
+
+
+```{r cvK22,echo=FALSE,fig.width=3.5, fig.height=3.5,fig.align="center"}
+head(cv.out1$cvsd)
+```
+
+## 5. Evaluation de l'erreur de classification sur les donn?es de test
+
+```{r Data_Khan_test, echo=FALSE}
+load(paste(path,"Data_Khan_test.RData",sep=""))
+```
+
+```{r cvK3, echo=FALSE,fig.width=3.5, fig.height=3.5,fig.align="center"}
+cv.out2<- cv.glmnet(data_Khan_test$X,data_Khan_test$Y,family = "binomial"
+                    ,alpha =1,type.measure = "mse")
+plot(cv.out2)
+```
+
+
+# Conclusion
+
+Au cours de ce projet, nous avons eu l'occasion d'exploiter diff?rentes librairies (MASS, caret, pls, glmnet, ROCR, caTools), d'analyser des donn?es, de mettre en place des mod?les lin?aires et de comprendre les m?canismes pour r?aliser la pr?diction des donn?es.
